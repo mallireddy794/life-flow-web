@@ -6,10 +6,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Heart } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { apiRequest } from '../services/api';
+import { validateEmail, validatePassword, validatePhone } from '../utils/validation';
+import { useUser } from '../contexts/UserContext';
 
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const { setUser, setRole: setGlobalRole } = useUser();
   const location = useLocation();
 
   // Get role from URL search params
@@ -23,6 +26,7 @@ export function SignupPage() {
     password: '',
     confirmPassword: '',
     role: roleFromUrl,
+    bloodGroup: '',
   });
 
   useEffect(() => {
@@ -33,11 +37,66 @@ export function SignupPage() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setFormData({ ...formData, email: value });
+
+    if (value && !validateEmail(value)) {
+      setEmailError('Invalid email format (e.g., user@example.com)');
+    } else {
+      setEmailError(null);
+    }
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setFormData({ ...formData, password: value });
+
+    if (value && !validatePassword(value)) {
+      setPasswordError('Password must be 8+ chars, with an uppercase, a number, and a special char');
+    } else {
+      setPasswordError(null);
+    }
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    // Allow only digits
+    const cleaned = value.replace(/\D/g, '');
+    if (cleaned.length <= 10) {
+      setFormData({ ...formData, phone: cleaned });
+      
+      if (cleaned.length > 0 && !validatePhone(cleaned)) {
+        setPhoneError('Phone number must be exactly 10 digits');
+      } else {
+        setPhoneError(null);
+      }
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
+      return;
+    }
+
+    if (!validateEmail(formData.email)) {
+      setEmailError('Enter a valid email');
+      return;
+    }
+
+    if (!validatePassword(formData.password)) {
+      setPasswordError('Password does not meet requirements');
+      return;
+    }
+
+    if (!validatePhone(formData.phone)) {
+      setPhoneError('Enter a 10-digit phone number');
       return;
     }
 
@@ -49,11 +108,28 @@ export function SignupPage() {
         name: formData.fullName,
         email: formData.email,
         password: formData.password,
-        role: formData.role
+        role: formData.role,
+        phone: formData.phone,
+        blood_group: formData.bloodGroup
       });
 
-      // Signup successful, redirect to login
-      navigate(`/login?role=${formData.role}`);
+      // Signup successful, try to auto-login
+      const loginResult = await apiRequest('/login', 'POST', {
+        email: formData.email,
+        password: formData.password
+      });
+
+      // Update context with user info and include bloodGroup since signup knows it
+      const userData = { ...loginResult.user, email: formData.email, blood_group: formData.bloodGroup };
+      setUser(userData);
+      setGlobalRole(loginResult.user.role);
+
+      // Redirect based on role
+      if (loginResult.user.role === 'patient') {
+        navigate('/patient-dashboard');
+      } else {
+        navigate('/donor-dashboard');
+      }
     } catch (err: any) {
       setError(err.message || 'Signup failed. Please try again.');
     } finally {
@@ -96,10 +172,13 @@ export function SignupPage() {
                   type="email"
                   placeholder="your@email.com"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="mt-1"
+                  onChange={handleEmailChange}
+                  className={`mt-1 ${emailError ? 'border-red-500' : ''}`}
                   required
                 />
+                {emailError && (
+                  <p className="text-red-500 text-xs mt-1">{emailError}</p>
+                )}
               </div>
 
               <div>
@@ -107,12 +186,15 @@ export function SignupPage() {
                 <Input
                   id="phone"
                   type="tel"
-                  placeholder="+1 (555) 000-0000"
+                  placeholder="10-digit number"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                  className="mt-1"
+                  onChange={handlePhoneChange}
+                  className={`mt-1 ${phoneError ? 'border-red-500' : ''}`}
                   required
                 />
+                {phoneError && (
+                  <p className="text-red-500 text-xs mt-1">{phoneError}</p>
+                )}
               </div>
             </div>
 
@@ -124,10 +206,13 @@ export function SignupPage() {
                   type="password"
                   placeholder="Create a strong password"
                   value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="mt-1"
+                  onChange={handlePasswordChange}
+                  className={`mt-1 ${passwordError ? 'border-red-500' : ''}`}
                   required
                 />
+                {passwordError && (
+                  <p className="text-red-500 text-xs mt-1">{passwordError}</p>
+                )}
               </div>
 
               <div>
@@ -159,6 +244,25 @@ export function SignupPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {(formData.role === 'donor' || formData.role === 'patient') && (
+              <div>
+                <Label htmlFor="bloodGroup">Blood Group</Label>
+                <Select
+                  value={formData.bloodGroup}
+                  onValueChange={(value) => setFormData({ ...formData, bloodGroup: value })}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select blood group" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(group => (
+                      <SelectItem key={group} value={group}>{group}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="flex items-start gap-2">
               <input type="checkbox" id="terms" className="mt-1 rounded border-gray-300" required />

@@ -24,6 +24,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { NotificationsPage } from "./pages/NotificationsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { DonationHistory } from "./pages/DonationHistory";
+import { PatientProfileSetup } from "./pages/PatientProfileSetup";
 
 export const router = createBrowserRouter([
   {
@@ -125,5 +126,9 @@ export const router = createBrowserRouter([
   {
     path: "/donation-history",
     Component: DonationHistory,
+  },
+  {
+    path: "/patient-profile-setup",
+    Component: PatientProfileSetup,
   },
 ]);

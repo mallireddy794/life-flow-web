@@ -7,6 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../components/ui/switch';
 import { ArrowLeft, AlertTriangle, Send } from 'lucide-react';
 import { useState } from 'react';
+import { useUser } from '../contexts/UserContext';
+import { apiRequest } from '../services/api';
 
 export function EmergencyBloodRequest() {
   const navigate = useNavigate();
@@ -21,10 +23,34 @@ export function EmergencyBloodRequest() {
     contact: '',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { user } = useUser();
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Show success and navigate to tracking
-    navigate('/live-tracking');
+    if (!user?.id) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await apiRequest(`/patient/request/${user.id}`, 'POST', {
+        patient_name: formData.patientName,
+        blood_group: formData.bloodType,
+        units_required: parseInt(formData.units),
+        hospital_name: formData.hospital,
+        city: formData.city,
+        contact_number: formData.contact,
+        urgency_level: isCritical ? 'EMERGENCY' : 'HIGH'
+      });
+      // Show success and navigate to tracking
+      navigate('/live-tracking');
+    } catch (err: any) {
+      setError(err.message || 'Failed to create request');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -200,42 +226,21 @@ export function EmergencyBloodRequest() {
               </ul>
             </div>
 
-            {/* Nearby Donors Preview */}
-            <div className="bg-white border rounded-lg p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="font-semibold text-gray-900 border-l-4 border-red-500 pl-3">Nearby Available Donors</h4>
-                <span className="text-xs bg-green-100 text-green-700 font-bold px-2 py-1 rounded-full animate-pulse flex items-center gap-1">
-                  <div className="w-1.5 h-1.5 bg-green-600 rounded-full"></div> 5 Donors Live Now
-                </span>
+
+
+            {error && (
+              <div className="p-4 bg-red-100 border border-red-400 text-red-700 rounded-lg">
+                {error}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  { name: "Suresh Reddy", bg: "O+", dist: "0.8km", status: "Ready" },
-                  { name: "Rahul Sharma", bg: "B+", dist: "1.2km", status: "Online" },
-                  { name: "Anjali Gupta", bg: "A-", dist: "2.5km", status: "Active" }
-                ].map((d, i) => (
-                  <div key={i} className="flex flex-col p-3 bg-gray-50 rounded-lg border border-gray-100 relative group hover:border-red-200 transition">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-bold text-gray-800">{d.name}</span>
-                      <span className="text-xs font-black text-red-600 bg-red-50 px-1.5 py-0.5 rounded">{d.bg}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] text-gray-500">{d.dist} away</span>
-                      <span className="text-[10px] text-green-600 font-medium flex items-center gap-0.5">
-                        <div className="w-1 h-1 bg-green-500 rounded-full"></div> {d.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
 
             <Button
               type="submit"
+              disabled={loading}
               className={`w-full text-lg py-6 ${isCritical ? 'bg-red-600 hover:bg-red-700 animate-pulse' : 'bg-blue-600 hover:bg-blue-700'}`}
             >
               <Send className="w-5 h-5 mr-2" />
-              {isCritical ? 'Send Critical Alert to Nearby Donors' : 'Notify Nearby Donors'}
+              {loading ? 'Sending...' : (isCritical ? 'Send Critical Alert to Nearby Donors' : 'Notify Nearby Donors')}
             </Button>
           </form>
         </Card>

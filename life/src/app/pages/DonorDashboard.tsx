@@ -9,12 +9,24 @@ import { apiRequest } from '../services/api';
 export function DonorDashboard() {
   const navigate = useNavigate();
   const { user, setUser } = useUser();
+  useEffect(() => {
+    if (user && !user.is_profile_complete) {
+      navigate('/donor-profile-setup');
+    }
+  }, [user]);
+
   const [isAvailable, setIsAvailable] = useState(true);
-  const [bloodGroup, setBloodGroup] = useState<string>('Not Set');
+  const [bloodGroup, setBloodGroup] = useState<string>(user?.blood_group || 'Not Set');
   const [requests, setRequests] = useState<any[]>([]);
+  const [historyCount, setHistoryCount] = useState(0);
 
   useEffect(() => {
     if (user?.id) {
+      apiRequest(`/donor/donations/history?donor_id=${user.id}`, 'GET')
+        .then(data => {
+          if (data.history) setHistoryCount(data.history.length);
+        }).catch(err => console.error("Error fetching count:", err));
+
       apiRequest(`/donor/profile/${user.id}`, 'GET')
         .then(data => {
           if (data.blood_group) {
@@ -34,10 +46,30 @@ export function DonorDashboard() {
         navigator.geolocation.getCurrentPosition(async (position) => {
           const { latitude, longitude } = position.coords;
           try {
-            const data = await apiRequest(`/blood-requests/nearby?lat=${latitude}&lng=${longitude}&radius_km=20`, 'GET');
-            setRequests(data);
+            const [nearbyResult, directResult] = await Promise.all([
+              apiRequest(`/blood-requests/nearby?lat=${latitude}&lng=${longitude}&radius_km=20`, 'GET'),
+              apiRequest(`/donor/requests?donor_id=${user.id}`, 'GET')
+            ]);
+            
+            // Map direct requests to the same format as broadcasted ones
+            const directMapped = (directResult || []).map((dr: any) => ({
+              id: dr.id,
+              blood_group: dr.blood_group,
+              patient_name: `Patient ${dr.patient_id}`, // In actual app, fetch name
+              hospital_name: "Direct Request",
+              distance_km: 0, // Direct requests are always prioritized
+              urgency_level: dr.urgency,
+              status: dr.status,
+              is_direct: true
+            }));
+
+            // Filter out completed/rejected
+            const filteredNearby = (nearbyResult || []).filter((r: any) => r.status.toLowerCase() === 'pending');
+            const filteredDirect = directMapped.filter((r: any) => r.status.toLowerCase() === 'pending');
+
+            setRequests([...filteredDirect, ...filteredNearby]);
           } catch (err) {
-            console.error("Failed to fetch requests for dashboard preview:", err);
+            console.error("Failed to fetch requests for donor dashboard:", err);
           }
         });
       }
@@ -167,7 +199,7 @@ export function DonorDashboard() {
                   </div>
                   <div>
                     <p className="text-sm text-gray-600">Total Donations</p>
-                    <p className="text-2xl font-bold text-gray-900">12</p>
+                    <p className="text-2xl font-bold text-gray-900">{historyCount}</p>
                   </div>
                 </div>
               </Card>
@@ -179,7 +211,7 @@ export function DonorDashboard() {
                   </div>
                   <div>
                     <p className="text-sm text-gray-600">Lives Saved</p>
-                    <p className="text-2xl font-bold text-gray-900">36</p>
+                    <p className="text-2xl font-bold text-gray-900">{historyCount * 3}</p>
                   </div>
                 </div>
               </Card>
@@ -191,7 +223,7 @@ export function DonorDashboard() {
                   </div>
                   <div>
                     <p className="text-sm text-gray-600">Active Requests</p>
-                    <p className="text-2xl font-bold text-gray-900">3</p>
+                    <p className="text-2xl font-bold text-gray-900">{requests.length}</p>
                   </div>
                 </div>
               </Card>
@@ -203,7 +235,7 @@ export function DonorDashboard() {
                   </div>
                   <div>
                     <p className="text-sm text-gray-600">Next Eligible</p>
-                    <p className="text-2xl font-bold text-gray-900">24d</p>
+                    <p className="text-2xl font-bold text-gray-900">Now</p>
                   </div>
                 </div>
               </Card>
@@ -226,12 +258,14 @@ export function DonorDashboard() {
                       <div key={req.id} className="p-3 bg-red-50 rounded-lg border border-red-100">
                         <div className="flex justify-between items-start mb-1">
                           <span className="font-bold text-red-600">{req.blood_group}</span>
+                          <span className="text-[10px] text-gray-500 font-bold">{req.units_required || 1} units</span>
                           <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded uppercase font-bold tracking-wider">
                             {req.urgency_level}
                           </span>
                         </div>
                         <p className="text-xs font-semibold text-gray-800 truncate">{req.patient_name}</p>
-                        <p className="text-[10px] text-gray-500">{req.distance_km?.toFixed(1)} km away • {req.hospital_name}</p>
+                        <p className="text-[10px] text-blue-600 font-medium truncate">📍 {req.hospital_name}</p>
+                        <p className="text-[10px] text-gray-500">{req.distance_km?.toFixed(1)} km away • {req.city}</p>
                       </div>
                     ))}
                   </div>
@@ -252,7 +286,7 @@ export function DonorDashboard() {
                 <h3 className="font-semibold text-lg mb-2">Chat with Patient</h3>
                 <p className="text-gray-600 text-sm mb-4">Communicate with patients who need your help</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-blue-600 font-semibold">2 Messages</span>
+                  <span className="text-blue-600 font-semibold">Check Inbox</span>
                   <span className="text-blue-600">→</span>
                 </div>
               </Card>
@@ -282,7 +316,7 @@ export function DonorDashboard() {
                 <h3 className="font-semibold text-lg mb-2">Donation History</h3>
                 <p className="text-gray-600 text-sm mb-4">Track your past donations and impact</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-purple-600 font-semibold">12 Total</span>
+                  <span className="text-purple-600 font-semibold">View All</span>
                   <span className="text-purple-600">→</span>
                 </div>
               </Card>
@@ -292,21 +326,23 @@ export function DonorDashboard() {
             <Card className="mt-8 p-6">
               <h3 className="text-xl font-semibold mb-4">Recent Activity</h3>
               <div className="space-y-4">
-                {[
-                  { type: 'request', text: 'New blood request from City Hospital', time: '2 hours ago', color: 'red' },
-                  { type: 'message', text: 'Message from Sarah Johnson', time: '5 hours ago', color: 'blue' },
-                  { type: 'donation', text: 'Donation completed at Central Medical', time: '2 days ago', color: 'green' },
-                ].map((activity, index) => (
-                  <div key={index} className="flex items-center gap-4 p-3 hover:bg-gray-50 rounded-lg">
-                    <div className={`bg-${activity.color}-100 p-2 rounded-lg`}>
-                      <Activity className={`w-5 h-5 text-${activity.color}-600`} />
+                {requests.length > 0 ? (
+                  requests.slice(0, 3).map((req, index) => (
+                    <div key={index} className="flex items-center gap-4 p-3 hover:bg-gray-50 rounded-lg cursor-pointer" onClick={() => navigate('/nearby-blood-requests')}>
+                      <div className={`bg-red-100 p-2 rounded-lg`}>
+                        <Activity className={`w-5 h-5 text-red-600`} />
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900">New blood request for {req.blood_group}</p>
+                        <p className="text-sm text-gray-500">{req.hospital_name} • {req.distance_km?.toFixed(1)} km away</p>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{activity.text}</p>
-                      <p className="text-sm text-gray-500">{activity.time}</p>
-                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-6 text-gray-500">
+                    No recent activity to show.
                   </div>
-                ))}
+                )}
               </div>
             </Card>
           </>

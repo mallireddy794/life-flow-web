@@ -58,14 +58,28 @@ export function LiveRequestTracking() {
 
       <div className="max-w-4xl mx-auto px-4 py-8">
         {/* Status Overview */}
-        <Card className="p-6 mb-8 bg-gradient-to-r from-blue-600 to-blue-700 text-white">
+        <Card className={`p-6 mb-8 text-white ${request.urgency === 'EMERGENCY' ? 'bg-gradient-to-r from-red-600 to-red-700 animate-pulse' : 'bg-gradient-to-r from-blue-600 to-blue-700'}`}>
           <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold mb-2">Request Status: {request.request_status}</h2>
-              <p className="text-blue-100">Blood Type: {request.blood_group} • Units: {request.units_required} • Hospital: {request.hospital_name}</p>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <h2 className="text-2xl font-bold uppercase tracking-tight">Status: {request.request_status}</h2>
+                {request.urgency === 'EMERGENCY' && (
+                  <span className="px-2 py-0.5 bg-white text-red-600 text-[10px] font-bold rounded animate-bounce">
+                    CRITICAL
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-y-2 text-sm">
+                 <p className="text-blue-50/80 font-medium">Patient: <span className="text-white">{request.patient_name}</span></p>
+                 <p className="text-blue-50/80 font-medium">Blood: <span className="text-white font-bold">{request.blood_group}</span></p>
+                 <p className="text-blue-50/80 font-medium">Units: <span className="text-white">{request.units_required}</span></p>
+                 <p className="text-blue-50/80 font-medium">City: <span className="text-white">{request.city}</span></p>
+                 <p className="text-blue-50/80 font-medium whitespace-nowrap">Hospital: <span className="text-white truncate max-w-[150px] inline-block align-bottom">{request.hospital_name}</span></p>
+                 <p className="text-blue-50/80 font-medium">Contact: <span className="text-white">{request.contact}</span></p>
+              </div>
             </div>
-            <div className="bg-white/20 p-4 rounded-lg">
-              <Heart className="w-8 h-8 animate-pulse" />
+            <div className={`p-4 rounded-xl ${request.urgency === 'EMERGENCY' ? 'bg-white/20' : 'bg-white/10'}`}>
+              <Heart className={`w-10 h-10 ${request.urgency === 'EMERGENCY' ? 'text-white fill-white' : 'text-blue-100'}`} />
             </div>
           </div>
         </Card>

@@ -1,0 +1,16 @@
+CREATE TABLE `donor_requests` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `patient_id` int(11) NOT NULL,
+  `donor_id` int(11) NOT NULL,
+  `blood_group` varchar(5) NOT NULL,
+  `units_needed` int(11) NOT NULL,
+  `urgency` varchar(20) DEFAULT 'NORMAL',
+  `message` varchar(255) DEFAULT NULL,
+  `status` varchar(20) DEFAULT 'PENDING',
+  `created_at` datetime DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_donor_requests_donor` (`donor_id`,`status`,`created_at`),
+  KEY `idx_donor_requests_patient` (`patient_id`,`status`,`created_at`),
+  CONSTRAINT `donor_requests_ibfk_1` FOREIGN KEY (`patient_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `donor_requests_ibfk_2` FOREIGN KEY (`donor_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=34 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci

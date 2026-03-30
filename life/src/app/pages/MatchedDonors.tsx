@@ -14,57 +14,55 @@ export function MatchedDonors() {
   const [bloodGroup, setBloodGroup] = useState<string>('');
 
   useEffect(() => {
-    if (user?.id) {
-      // First get patient's blood group
-      apiRequest(`/patient/profile/${user.id}`, 'GET')
-        .then(data => {
-          const bg = data.blood_group || 'A+';
-          setBloodGroup(bg);
-          fetchDonors(bg);
-        })
-        .catch(err => {
-          console.error("Error fetching profile:", err);
-          fetchDonors('A+'); // Fallback to call fetchDonors even on error
-        });
+    if (user?.blood_group) {
+        setBloodGroup(user.blood_group);
+        fetchDonors(user.blood_group);
+    } else if (user?.id) {
+        // Fallback or search in people nearby (large radius)
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(async (pos) => {
+            try {
+              const data = await apiRequest(`/patients/nearby?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}&radius_km=10000`, 'GET');
+              const self = data.find((p: any) => p.id === user.id);
+              if (self && self.blood_group) {
+                setBloodGroup(self.blood_group);
+                fetchDonors(self.blood_group);
+              } else {
+                fetchDonors('A+'); // Ultimate fallback
+              }
+            } catch (e) { 
+              console.error("Searching self failed");
+              fetchDonors('A+'); 
+            }
+          });
+        } else {
+          fetchDonors('A+');
+        }
     }
   }, [user]);
 
   const fetchDonors = (bg: string) => {
-    const getMockDonors = (currentBg: string) => [
-      { name: "Rahul Sharma", bg: "O+", distance_km: 1.2, city: "Hyderabad", score: 98 },
-      { name: "Anjali Gupta", bg: "A-", distance_km: 2.5, city: "Secunderabad", score: 96 },
-      { name: "Suresh Kumar", bg: currentBg || 'A+', distance_km: 0.8, city: "Gachibowli", score: 95 },
-      { name: "Priya Singh", bg: "B+", distance_km: 3.4, city: "Hitech City", score: 92 },
-      { name: "Vikram Reddy", bg: currentBg || 'A+', distance_km: 4.1, city: "Kukatpally", score: 89 },
-    ].map((d, i) => ({
-      donor_user_id: 8000 + i,
-      name: d.name,
-      blood_group: d.bg,
-      city: d.city,
-      distance_km: d.distance_km,
-      ai_score: d.score,
-      is_mock: true
-    }));
+
 
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
         try {
           const matchedData = await apiRequest(`/donors/nearby?lat=${latitude}&lng=${longitude}&blood_group=${encodeURIComponent(bg)}&radius_km=50`, 'GET');
-          setDonors([...(matchedData || []), ...getMockDonors(bg)]);
+          setDonors(matchedData || []);
         } catch (err) {
           console.error("Failed to fetch matched donors:", err);
-          setDonors(getMockDonors(bg));
+          setDonors([]);
         } finally {
           setLoading(false);
         }
       }, (err) => {
         console.error("Location error:", err);
-        setDonors(getMockDonors(bg));
+        setDonors([]);
         setLoading(false);
       });
     } else {
-      setDonors(getMockDonors(bg));
+      setDonors([]);
       setLoading(false);
     }
   };
@@ -170,7 +168,7 @@ export function MatchedDonors() {
                     <div className="flex flex-wrap gap-3">
                       <Button
                         className="bg-blue-600 hover:bg-blue-700"
-                        onClick={() => navigate('/chat')}
+                        onClick={() => navigate('/chat', { state: { recipientId: donor.donor_user_id, name: donor.name } })}
                       >
                         <MessageCircle className="w-4 h-4 mr-2" />
                         Contact Donor

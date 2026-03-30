@@ -7,6 +7,12 @@ interface User {
   name: string;
   role: UserRole;
   email?: string;
+  phone?: string;
+  blood_group?: string;
+  is_profile_complete?: boolean;
+  units_needed?: number;
+  hospital_name?: string;
+  last_donation_date?: string;
 }
 
 interface UserContextType {

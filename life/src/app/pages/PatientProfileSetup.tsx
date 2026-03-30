@@ -8,17 +8,16 @@ import { useState } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { apiRequest } from '../services/api';
 
-export function DonorProfileSetup() {
+export function PatientProfileSetup() {
   const navigate = useNavigate();
   const { user, setUser } = useUser();
   const [formData, setFormData] = useState({
     fullName: user?.name || '',
     bloodGroup: user?.blood_group || '',
-    age: '',
-    gender: 'male',
-    location: '',
-    contact: user?.phone || '',
-    lastDonation: user?.last_donation_date || '',
+    hospitalName: user?.hospital_name || '',
+    phone: user?.phone || '',
+    unitsNeeded: user?.units_needed || 0,
+    city: '',
   });
 
   const [loading, setLoading] = useState(false);
@@ -32,12 +31,12 @@ export function DonorProfileSetup() {
     setError(null);
 
     try {
-      await apiRequest(`/donor/profile/${user.id}`, 'PUT', {
-        phone: formData.contact,
+      await apiRequest(`/patient/profile/${user.id}`, 'PUT', {
+        phone: formData.phone,
         blood_group: formData.bloodGroup,
-        age: parseInt(formData.age),
-        city: formData.location,
-        last_donation_date: formData.lastDonation || null
+        hospital_name: formData.hospitalName,
+        units_needed: parseInt(formData.unitsNeeded.toString()),
+        city: formData.city
       });
 
       // Update user context
@@ -45,11 +44,13 @@ export function DonorProfileSetup() {
         ...user,
         name: formData.fullName,
         blood_group: formData.bloodGroup,
+        phone: formData.phone,
+        hospital_name: formData.hospitalName,
+        units_needed: parseInt(formData.unitsNeeded.toString()),
         is_profile_complete: true
       });
 
-      // Save profile and navigate to donor dashboard
-      navigate('/donor-dashboard');
+      navigate('/patient-dashboard');
     } catch (err: any) {
       setError(err.message || 'Failed to save profile');
     } finally {
@@ -58,15 +59,15 @@ export function DonorProfileSetup() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 to-white py-12 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-white py-12 px-4">
       <div className="max-w-3xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl p-8 md:p-12">
           <div className="text-center mb-8">
-            <div className="bg-red-100 p-4 rounded-full inline-block mb-4">
-              <User className="w-12 h-12 text-red-600" />
+            <div className="bg-blue-100 p-4 rounded-full inline-block mb-4">
+              <User className="w-12 h-12 text-blue-600" />
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Complete Your Donor Profile</h1>
-            <p className="text-gray-600">Help us match you with patients who need your help</p>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">Complete Your Patient Profile</h1>
+            <p className="text-gray-600">Provide details to help donors find you in time of need</p>
           </div>
           
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -83,7 +84,7 @@ export function DonorProfileSetup() {
               />
             </div>
             
-            <div className="grid md:grid-cols-3 gap-4">
+            <div className="grid md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="bloodGroup">Blood Group</Label>
                 <Select 
@@ -107,88 +108,59 @@ export function DonorProfileSetup() {
               </div>
               
               <div>
-                <Label htmlFor="age">Age</Label>
+                <Label htmlFor="unitsNeeded">Units Needed (Total)</Label>
                 <Input
-                  id="age"
+                  id="unitsNeeded"
                   type="number"
-                  placeholder="Your age"
-                  value={formData.age}
-                  onChange={(e) => setFormData({...formData, age: e.target.value})}
+                  placeholder="e.g., 2"
+                  value={formData.unitsNeeded}
+                  onChange={(e) => setFormData({...formData, unitsNeeded: parseInt(e.target.value) || 0})}
                   className="mt-1"
-                  min="18"
-                  max="65"
-                  required
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="gender">Gender</Label>
-                <Select 
-                  value={formData.gender} 
-                  onValueChange={(value) => setFormData({...formData, gender: value})}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="male">Male</SelectItem>
-                    <SelectItem value="female">Female</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="location">Location (City, State)</Label>
-                <Input
-                  id="location"
-                  type="text"
-                  placeholder="e.g., New York, NY"
-                  value={formData.location}
-                  onChange={(e) => setFormData({...formData, location: e.target.value})}
-                  className="mt-1"
-                  required
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="contact">Contact Number</Label>
-                <Input
-                  id="contact"
-                  type="tel"
-                  placeholder="+1 (555) 000-0000"
-                  value={formData.contact}
-                  onChange={(e) => setFormData({...formData, contact: e.target.value})}
-                  className="mt-1"
+                  min="0"
                   required
                 />
               </div>
             </div>
             
             <div>
-              <Label htmlFor="lastDonation">Last Donation Date (Optional)</Label>
+              <Label htmlFor="hospitalName">Hospital Name</Label>
               <Input
-                id="lastDonation"
-                type="date"
-                value={formData.lastDonation}
-                onChange={(e) => setFormData({...formData, lastDonation: e.target.value})}
+                id="hospitalName"
+                type="text"
+                placeholder="Hospital where you are admitted"
+                value={formData.hospitalName}
+                onChange={(e) => setFormData({...formData, hospitalName: e.target.value})}
                 className="mt-1"
+                required
               />
-              <p className="text-sm text-gray-500 mt-1">
-                This helps us determine your eligibility for donation
-              </p>
             </div>
-            
-            <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <h3 className="font-semibold text-yellow-900 mb-2">Important Information</h3>
-              <ul className="text-sm text-yellow-800 space-y-1">
-                <li>• You must be 18-65 years old to donate blood</li>
-                <li>• Minimum weight requirement: 50 kg (110 lbs)</li>
-                <li>• Wait at least 56 days between whole blood donations</li>
-                <li>• Be in good health and feeling well</li>
-              </ul>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="city">City</Label>
+                <Input
+                  id="city"
+                  type="text"
+                  placeholder="Your current city"
+                  value={formData.city}
+                  onChange={(e) => setFormData({...formData, city: e.target.value})}
+                  className="mt-1"
+                  required
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="phone">Contact Number</Label>
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="Primary contact for donors"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  className="mt-1"
+                  required
+                />
+              </div>
             </div>
             
             {error && (
@@ -199,21 +171,12 @@ export function DonorProfileSetup() {
             
             <Button 
               type="submit" 
-              className="w-full bg-red-600 hover:bg-red-700 text-lg py-6"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-lg py-6"
               disabled={loading}
             >
               {loading ? 'Saving Profile...' : 'Save Profile & Continue'}
             </Button>
           </form>
-        </div>
-        
-        <div className="text-center mt-6">
-          <button 
-            onClick={() => navigate('/otp-verification')}
-            className="text-gray-600 hover:text-gray-900"
-          >
-            ← Go back
-          </button>
         </div>
       </div>
     </div>

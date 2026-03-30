@@ -50,22 +50,34 @@ export function DonorMapPage() {
     return null;
   });
   const [donors, setDonors] = useState<any[]>([]);
+  const [hospitals, setHospitals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [bloodGroup, setBloodGroup] = useState<string | null>(null);
 
+  // Custom icon for hospitals
+  const hospitalIcon = L.divIcon({
+    className: 'custom-hospital-marker',
+    html: `<div class="w-8 h-8 bg-blue-600 rounded-lg shadow-lg flex items-center justify-center p-1 border-2 border-white">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" class="w-full h-full">
+              <path d="M11 11V7H13V11H17V13H13V17H11V13H7V11H11ZM12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20Z" />
+            </svg>
+           </div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 16]
+  });
+
   // Fetch patient's blood group first if they are a patient
   useEffect(() => {
-    if (user?.id && user.role === 'patient') {
-      apiRequest(`/patient/profile/${user.id}`, 'GET')
-        .then(data => {
-          if (data.blood_group) {
-            setBloodGroup(data.blood_group);
-          }
-        })
-        .catch(err => console.error("Error fetching patient profile:", err));
+    if (user?.blood_group) {
+        setBloodGroup(user.blood_group);
+    } else if (user?.id && user.role === 'patient') {
+        // Find self in nearby list as fallback
+        if (position) {
+          fetchNearbyData(position, 'A+'); // Start with default, will update when self found
+        }
     }
-  }, [user]);
+  }, [user, position === null]);
 
   // Get real-time user location
   useEffect(() => {
@@ -81,11 +93,11 @@ export function DonorMapPage() {
         setPosition(newPos);
         setLoading(false);
         // Initial fetch
-        fetchNearbyDonors(newPos, bloodGroup || 'A+');
+        fetchNearbyData(newPos, bloodGroup || 'A+');
 
         // If user is a donor, update their location in DB
         if (user?.id && user.role === 'donor') {
-          apiRequest("/update-location", "POST", {
+          apiRequest("/update_location", "POST", {
             user_id: user.id,
             lat: pos.coords.latitude,
             lng: pos.coords.longitude
@@ -102,7 +114,7 @@ export function DonorMapPage() {
     // Real-time polling for other donors
     const pollInterval = setInterval(() => {
       if (position) {
-        fetchNearbyDonors(position, bloodGroup || 'A+');
+        fetchNearbyData(position, bloodGroup || 'A+');
       }
     }, 10000); // Refresh every 10 seconds
 
@@ -112,43 +124,17 @@ export function DonorMapPage() {
     };
   }, [bloodGroup, position === null]); // only re-run effect if position was null and is now established, or bloodGroup changes
 
-  const fetchNearbyDonors = async (pos: [number, number], bg: string) => {
+  const fetchNearbyData = async (pos: [number, number], bg: string) => {
     try {
-      const data = await apiRequest(`/donors/nearby?lat=${pos[0]}&lng=${pos[1]}&radius_km=10&blood_group=${encodeURIComponent(bg)}`, 'GET');
+      const [donorData, hospitalData] = await Promise.all([
+        apiRequest(`/donors/nearby?lat=${pos[0]}&lng=${pos[1]}&radius_km=10&blood_group=${encodeURIComponent(bg)}`, 'GET'),
+        apiRequest(`/hospitals/nearby?lat=${pos[0]}&lng=${pos[1]}`, 'GET')
+      ]);
 
-      let combinedDonors = data || [];
-
-      // If we are a patient, always show some "random" mock donors to make the map look active
-      if (user?.role === 'patient') {
-        const mockDonors = [
-          { name: "Rahul Sharma", bg: "O+", offset: [0.008, 0.012] },
-          { name: "Anjali Gupta", bg: "A-", offset: [-0.015, 0.007] },
-          { name: "Suresh Kumar", bg: bg, offset: [0.005, -0.011] },
-          { name: "Priya Singh", bg: "B+", offset: [-0.009, -0.018] },
-          { name: "Vikram Reddy", bg: bg, offset: [0.021, 0.015] },
-        ].map((d, i) => ({
-          donor_user_id: 8000 + i,
-          name: d.name,
-          blood_group: d.bg,
-          latitude: pos[0] + d.offset[0],
-          longitude: pos[1] + d.offset[1],
-          distance_km: Math.sqrt(Math.pow(d.offset[0] * 111, 2) + Math.pow(d.offset[1] * 111, 2)),
-          is_mock: true
-        }));
-
-        combinedDonors = [...combinedDonors, ...mockDonors];
-      }
-
-      setDonors(combinedDonors);
+      setDonors(donorData || []);
+      setHospitals(hospitalData || []);
     } catch (err) {
-      console.error("Failed to fetch donors:", err);
-      // Fallback to mocks if API fails
-      if (user?.role === 'patient') {
-        const fallbackMocks = [
-          { name: "Emergency Donor", bg: bg, latitude: pos[0] + 0.01, longitude: pos[1] + 0.01, distance_km: 1.5 }
-        ];
-        setDonors(fallbackMocks);
-      }
+      console.error("Failed to fetch map data:", err);
     }
   };
 
@@ -207,7 +193,7 @@ export function DonorMapPage() {
                 {/* Donor Markers */}
                 {donors.map((donor, idx) => (
                   <Marker
-                    key={idx}
+                    key={`donor-${idx}`}
                     position={[donor.latitude, donor.longitude]}
                     icon={donorIcon}
                   >
@@ -219,10 +205,34 @@ export function DonorMapPage() {
                         <Button
                           size="sm"
                           className="w-full mt-2 bg-blue-600 h-8 text-xs"
-                          onClick={() => navigate('/chat')}
+                          onClick={() => navigate('/chat', { state: { recipientId: donor.donor_user_id, name: donor.name } })}
                         >
                           Contact Now
                         </Button>
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
+
+                {/* Hospital Markers */}
+                {hospitals.map((hospital) => (
+                  <Marker
+                    key={`hosp-${hospital.id}`}
+                    position={[hospital.latitude, hospital.longitude]}
+                    icon={hospitalIcon}
+                  >
+                    <Popup>
+                      <div className="p-1 min-w-[200px]">
+                        <p className="font-bold text-base mb-1 text-blue-800">{hospital.name}</p>
+                        <p className="text-xs text-gray-600 mb-2">{hospital.address}</p>
+                        <div className="flex flex-wrap gap-1 mb-3">
+                          {hospital.blood_bank && <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] rounded animate-pulse">Blood Bank</span>}
+                          {hospital.emergency && <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-[10px] rounded">24/7 ER</span>}
+                        </div>
+                        <div className="flex gap-2">
+                           <Button size="sm" className="flex-1 h-7 text-[10px] bg-green-600">Call</Button>
+                           <Button size="sm" variant="outline" className="flex-1 h-7 text-[10px]" onClick={() => navigate('/nearby-hospitals')}>Details</Button>
+                        </div>
                       </div>
                     </Popup>
                   </Marker>
@@ -245,53 +255,63 @@ export function DonorMapPage() {
           </Card>
 
           {/* Sidebar */}
-          <div className="space-y-4">
+          <div className="space-y-4 h-[600px] overflow-y-auto pr-2 custom-scrollbar">
             <Card className="p-4 border-2">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                Donors Near You ({donors.length})
+              <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></div>
+                Nearest Donors ({donors.length})
               </h3>
-              <div className="space-y-3 max-h-[480px] overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-3">
                 {donors.length === 0 ? (
-                  <p className="text-center text-gray-500 py-8">No donors found in this area yet.</p>
+                  <p className="text-center text-gray-500 py-4 text-sm">No donors nearby.</p>
                 ) : (
-                  donors.map((donor, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 border rounded-xl hover:border-red-600 hover:bg-red-50 cursor-pointer transition-all group shadow-sm"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold">
-                          {donor.name[0]}
-                        </div>
-                        <div className="flex-1">
-                          <p className="font-semibold text-gray-900 group-hover:text-red-700">{donor.name}</p>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="px-1.5 py-0.5 bg-red-600 text-white text-[10px] rounded font-bold">{donor.blood_group}</span>
-                            <span className="text-xs text-gray-500">{donor.distance_km?.toFixed(1)} km</span>
-                          </div>
-                        </div>
-                        <ArrowLeft className="w-4 h-4 text-gray-300 rotate-180 group-hover:text-red-600" />
+                  donors.slice(0, 5).map((donor, idx) => (
+                    <div key={idx} className="p-2 border rounded-lg hover:bg-red-50 cursor-pointer text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{donor.name}</span>
+                        <span className="text-red-600 font-bold">{donor.blood_group}</span>
                       </div>
+                      <p className="text-[10px] text-gray-500">{donor.distance_km?.toFixed(1)} km away</p>
                     </div>
                   ))
                 )}
               </div>
             </Card>
 
+            <Card className="p-4 border-2">
+              <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-blue-600"></div>
+                Nearby Hospitals ({hospitals.length})
+              </h3>
+              <div className="space-y-3">
+                {hospitals.map((h) => (
+                  <div key={h.id} className="p-2 border rounded-lg hover:bg-blue-50 cursor-pointer text-sm">
+                    <p className="font-medium text-blue-900">{h.name}</p>
+                    <p className="text-[10px] text-gray-600 truncate">{h.address}</p>
+                    <div className="flex items-center justify-between mt-1">
+                      <span className="text-[10px] text-gray-500">{h.distance}</span>
+                      {h.blood_bank && <span className="text-[8px] bg-red-100 text-red-700 px-1 rounded font-bold">BLOOD BANK</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+
             <Card className="p-4 bg-gray-900 text-white border-0 shadow-xl">
-              <h3 className="font-semibold mb-3">Live Map Legend</h3>
-              <div className="space-y-3 text-sm">
+              <h3 className="font-semibold mb-3 text-sm">Live Map Legend</h3>
+              <div className="space-y-3 text-xs">
                 <div className="flex items-center gap-3">
                   <div className="w-3 h-3 rounded-full bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)]"></div>
-                  <span>Available Donors (Live)</span>
+                  <span>Available Donors</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 rounded-full bg-blue-600"></div>
-                  <span>Your Current Location</span>
+                  <div className="w-3 h-3 rounded-lg bg-blue-600"></div>
+                  <span>Hospitals / Blood Banks</span>
                 </div>
-                <hr className="border-gray-800" />
-                <p className="text-[10px] text-gray-400">Location is updated automatically every few seconds for accuracy.</p>
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 rounded-full bg-blue-400"></div>
+                  <span>Your Location</span>
+                </div>
               </div>
             </Card>
           </div>

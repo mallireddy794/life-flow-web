@@ -1,12 +1,10 @@
 import { useNavigate } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
-import { Heart, MapPin, Phone, Navigation, ArrowLeft } from 'lucide-react';
-
+import { Heart, MapPin, Phone, Navigation, ArrowLeft, Calendar as CalendarIcon, MessageCircle, Users, Send } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { apiRequest } from '../services/api';
 import { useUser } from '../contexts/UserContext';
-import { MessageCircle, Users } from 'lucide-react';
 
 export function NearbyBloodRequests() {
   const navigate = useNavigate();
@@ -15,61 +13,25 @@ export function NearbyBloodRequests() {
   const [loading, setLoading] = useState(true);
   const [patientBloodGroup, setPatientBloodGroup] = useState<string>('');
 
-  const demoRequests = [
-    {
-      id: 991,
-      patient_name: "Rahul Sharma",
-      blood_group: "A+",
-      units_required: 2,
-      hospital_name: "City Central Hospital",
-      urgency_level: "Critical",
-      created_at: new Date().toISOString().split('T')[0],
-      distance_km: 1.2
-    },
-    {
-      id: 992,
-      patient_name: "Priya Patel",
-      blood_group: "O-",
-      units_required: 1,
-      hospital_name: "Hope Medical Center",
-      urgency_level: "High",
-      created_at: new Date().toISOString().split('T')[0],
-      distance_km: 3.5
-    },
-    {
-      id: 993,
-      patient_name: "Amit Kumar",
-      blood_group: "B+",
-      units_required: 3,
-      hospital_name: "Grace Nursing Home",
-      urgency_level: "Normal",
-      created_at: new Date().toISOString().split('T')[0],
-      distance_km: 5.8
-    }
-  ];
 
-  const demoDonors = [
-    {
-      donor_user_id: 1001,
-      name: "Suresh Reddy",
-      blood_group: "A+",
-      city: "Hyderabad",
-      distance_km: 2.1
-    },
-    {
-      donor_user_id: 1002,
-      name: "Anjali Singh",
-      blood_group: "A+",
-      city: "Secunderabad",
-      distance_km: 4.5
-    }
-  ];
 
   useEffect(() => {
     if (role === 'patient' && user?.id) {
       apiRequest(`/patient/profile/${user.id}`, 'GET')
-        .then(res => setPatientBloodGroup(res.blood_group || ''))
-        .catch(err => console.error("Error fetching patient BG:", err));
+        .then(res => {
+          if (res.blood_group) {
+            setPatientBloodGroup(res.blood_group);
+          } else {
+            console.warn("Patient blood group not found in profile");
+            setLoading(false);
+          }
+        })
+        .catch(err => {
+          console.error("Error fetching patient BG:", err);
+          setLoading(false);
+        });
+    } else if (role !== 'patient') {
+      // Watcher effect will handle this
     }
   }, [role, user]);
 
@@ -80,6 +42,7 @@ export function NearbyBloodRequests() {
   const fetchNearbyData = () => {
     if (role === 'patient' && !patientBloodGroup) return; // Wait for BG
     if ("geolocation" in navigator) {
+      setLoading(true);
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
         try {
@@ -87,32 +50,56 @@ export function NearbyBloodRequests() {
           if (role === 'patient') {
             result = await apiRequest(`/donors/nearby?lat=${latitude}&lng=${longitude}&blood_group=${encodeURIComponent(patientBloodGroup)}&radius_km=50`, 'GET');
           } else {
-            result = await apiRequest(`/blood-requests/nearby?lat=${latitude}&lng=${longitude}&radius_km=20`, 'GET');
+            // Donor view: Combine broadcasted and direct requests
+            const [broadcasted, direct] = await Promise.all([
+              apiRequest(`/blood-requests/nearby?lat=${latitude}&lng=${longitude}&radius_km=20`, 'GET'),
+              apiRequest(`/donor/requests?donor_id=${user.id}`, 'GET')
+            ]);
+            
+            const directMapped = (direct || []).map((dr: any) => ({
+                id: dr.id,
+                blood_group: dr.blood_group,
+                patient_name: `Patient ${dr.patient_id}`,
+                hospital_name: "DIRECT REQUEST",
+                city: 'Local',
+                units_required: dr.units_needed,
+                urgency_level: dr.urgency,
+                status: dr.status,
+                distance_km: 0,
+                is_direct: true
+            }));
+
+            result = [...directMapped.filter((r: any) => r.status.toLowerCase() !== 'completed'), ...broadcasted];
           }
 
-          if (!result || result.length === 0) {
-            setData(role === 'patient' ? demoDonors : demoRequests);
-          } else {
-            setData(result);
-          }
+          setData(result && Array.isArray(result) ? result : []);
         } catch (err) {
-          console.error("Failed to fetch nearby data, using fallback:", err);
-          setData(role === 'patient' ? demoDonors : demoRequests);
+          console.error("Failed to fetch nearby data:", err);
+          setData([]);
         } finally {
           setLoading(false);
         }
       }, (err) => {
         console.error("Location error:", err);
         setLoading(false);
-      });
+      }, { timeout: 10000 }); // 10 second timeout
     } else {
+      console.warn("Geolocation not supported");
       setLoading(false);
     }
   };
 
-  const handleAccept = () => {
-    // When a donor accepts, they proceed to eligibility check
-    navigate('/eligibility-check');
+  const handleAccept = async (requestId: number) => {
+    if (!user?.id) return;
+    try {
+      await apiRequest('/donor/accept_request', 'POST', {
+        request_id: requestId,
+        donor_id: user.id
+      });
+      navigate('/eligibility-check');
+    } catch (err) {
+      console.error("Accept failed:", err);
+    }
   };
 
   return (
@@ -216,7 +203,11 @@ export function NearbyBloodRequests() {
                       <div className="text-right">
                         <div className="text-3xl font-bold text-red-600">{item.blood_group}</div>
                         {role === 'donor' && (
-                          <p className="text-sm text-gray-600">{item.units_required} unit{item.units_required > 1 ? 's' : ''}</p>
+                          <div className="mt-1">
+                            <p className="text-sm font-semibold text-gray-800">{item.units_required} unit{item.units_required > 1 ? 's' : ''} needed</p>
+                            <p className="text-xs text-blue-600 font-medium">📍 {item.hospital_name || 'Hospital'}</p>
+                            <p className="text-[10px] text-gray-500 capitalize">{item.city || 'Local Area'}</p>
+                          </div>
                         )}
                         {role === 'patient' && (
                           <p className="text-sm text-gray-600">Match Score: 95%</p>
@@ -245,19 +236,49 @@ export function NearbyBloodRequests() {
                       {role === 'donor' ? (
                         <Button
                           className="bg-red-600 hover:bg-red-700"
-                          onClick={() => handleAccept()}
+                          onClick={() => handleAccept(item.id)}
                         >
                           <Heart className="w-4 h-4 mr-2 fill-white" />
                           Accept Request
                         </Button>
                       ) : (
-                        <Button
-                          className="bg-blue-600 hover:bg-blue-700"
-                          onClick={() => navigate('/chat')}
-                        >
-                          <MessageCircle className="w-4 h-4 mr-2" />
-                          Contact Donor
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            className="bg-blue-600 hover:bg-blue-700 font-semibold"
+                            onClick={() => navigate('/chat', { 
+                              state: { 
+                                recipientId: item.id || item.donor_user_id, 
+                                name: item.name 
+                              } 
+                            })}
+                          >
+                            <MessageCircle className="w-4 h-4 mr-2" />
+                            Contact Donor
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="border-red-600 text-red-600 hover:bg-red-50"
+                            onClick={async () => {
+                              try {
+                                await apiRequest('/patient/send_request', 'POST', {
+                                  patient_id: user.id,
+                                  donor_id: item.donor_user_id || item.id,
+                                  blood_group: patientBloodGroup || user.blood_group,
+                                  units_required: 1,
+                                  urgency_level: 'NORMAL',
+                                  city: item.city || 'Local'
+                                });
+                                alert(`Request sent to ${item.name}! They will see it on their dashboard.`);
+                              } catch (err: any) {
+                                console.error("Send request failed:", err);
+                                alert(err.message || "Failed to send request.");
+                              }
+                            }}
+                          >
+                            <Send className="w-4 h-4 mr-2" />
+                            Send Request
+                          </Button>
+                        </div>
                       )}
                       <Button
                         variant="outline"

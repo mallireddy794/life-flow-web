@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router';
 import { Button } from '../components/ui/button';
 import { Card } from '../components/ui/card';
-import { ArrowLeft, Users, Heart, MessageCircle, CheckCircle, Bell, MapPin, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Users, Heart, MessageCircle, CheckCircle, Bell, MapPin, AlertCircle, Activity } from 'lucide-react';
 import { useUser } from '../contexts/UserContext';
 
 export function NotificationsPage() {
@@ -21,6 +21,17 @@ export function NotificationsPage() {
       time: '5 minutes ago',
       unread: true,
       color: 'green',
+      roles: ['patient']
+    },
+    {
+      id: 10,
+      type: 'match',
+      icon: AlertCircle,
+      title: 'Emergency Blood Request Nearby',
+      message: 'City Hospital needs A+ blood immediately. (2.4km away)',
+      time: '2 minutes ago',
+      unread: true,
+      color: 'red',
       roles: ['donor']
     },
     {
@@ -32,18 +43,29 @@ export function NotificationsPage() {
       time: '15 minutes ago',
       unread: true,
       color: 'blue',
+      roles: ['patient']
+    },
+    {
+      id: 11,
+      type: 'response',
+      icon: Heart,
+      title: 'Patient Accepted Your Offer',
+      message: 'Sarah Williams has accepted your donation offer for City Hospital.',
+      time: '45 minutes ago',
+      unread: true,
+      color: 'green',
       roles: ['donor']
     },
     {
       id: 3,
       type: 'message',
       icon: MessageCircle,
-      title: 'New Message from Donor',
+      title: 'New Message Received',
       message: 'Michael Johnson: "I can come to the hospital within 30 minutes"',
       time: '30 minutes ago',
       unread: true,
       color: 'purple',
-      roles: ['donor']
+      roles: ['donor', 'patient']
     },
     {
       id: 4,
@@ -54,6 +76,17 @@ export function NotificationsPage() {
       time: '1 hour ago',
       unread: true,
       color: 'orange',
+      roles: ['patient']
+    },
+    {
+      id: 12,
+      type: 'match',
+      icon: Activity,
+      title: 'New Blood Request',
+      message: 'A patient in General Hospital needs O+ blood.',
+      time: '1 hour ago',
+      unread: true,
+      color: 'red',
       roles: ['donor']
     },
     {
@@ -65,7 +98,7 @@ export function NotificationsPage() {
       time: '2 hours ago',
       unread: false,
       color: 'red',
-      roles: ['donor']
+      roles: ['patient']
     },
     {
       id: 6,
@@ -82,8 +115,8 @@ export function NotificationsPage() {
       id: 7,
       type: 'message',
       icon: MessageCircle,
-      title: 'Message from Emma Williams',
-      message: '"I am available tomorrow morning. Please let me know the details."',
+      title: 'Message from Medical Staff',
+      message: '"Please ensure you have had a light meal before coming for donation."',
       time: '5 hours ago',
       unread: false,
       color: 'purple',
@@ -98,7 +131,7 @@ export function NotificationsPage() {
       time: '6 hours ago',
       unread: false,
       color: 'blue',
-      roles: ['donor']
+      roles: ['patient']
     },
     {
       id: 9,
@@ -113,15 +146,15 @@ export function NotificationsPage() {
     },
   ];
 
-  // show all notifications regardless of role; both donor and patient messages should be visible
-  const visibleNotifications = notifications; // previously filtered by role
+  // Filter notifications by user role
+  const visibleNotifications = notifications.filter(n => n.roles.includes(role || 'donor'));
 
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-<div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
               <button 
                 onClick={() => navigate(-1)}
                 className="p-2 hover:bg-gray-100 rounded-lg"
@@ -151,7 +184,7 @@ export function NotificationsPage() {
           </Button>
           <Button variant="outline" size="sm">
             <Users className="w-4 h-4 mr-1" />
-            {role === 'donor' ? 'Donor Matches' : 'Donor Requests'}
+            {role === 'donor' ? 'Blood Requests' : 'Donor Matches'}
           </Button>
           <Button variant="outline" size="sm">
             <CheckCircle className="w-4 h-4 mr-1" />
@@ -181,9 +214,9 @@ export function NotificationsPage() {
                   if (notification.type === 'message') {
                     navigate('/chat');
                   } else if (notification.type === 'match') {
-                    navigate('/matched-donors');
+                    navigate(role === 'donor' ? '/nearby-blood-requests' : '/matched-donors');
                   } else if (notification.type === 'response') {
-                    navigate('/live-tracking');
+                    navigate(role === 'donor' ? '/donation-history' : '/live-tracking');
                   } else if (notification.type === 'location') {
                     navigate('/donor-map');
                   }
@@ -199,7 +232,7 @@ export function NotificationsPage() {
                       <h3 className="font-semibold text-gray-900">
                         {notification.title}
                         {notification.unread && (
-                          <span className="ml-2 inline-block w-2 h-2 bg-blue-600 rounded-full"></span>
+                          <span className={`ml-2 inline-block w-2 h-2 bg-${accent}-600 rounded-full`}></span>
                         )}
                       </h3>
                       <span className="text-xs text-gray-500 whitespace-nowrap">

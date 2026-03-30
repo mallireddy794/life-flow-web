@@ -14,7 +14,15 @@ export async function apiRequest(endpoint: string, method: string = 'GET', data?
 
   try {
     const response = await fetch(`${BASE_URL}${endpoint}`, options);
-    const result = await response.json();
+    
+    const contentType = response.headers.get("content-type");
+    let result;
+    if (contentType && contentType.includes("application/json")) {
+        result = await response.json();
+    } else {
+        const text = await response.text();
+        throw new Error(`Server Error: ${response.status} - ${text.substring(0, 100)}`);
+    }
 
     if (!response.ok) {
       throw new Error(result.error || 'Something went wrong');
@@ -22,6 +30,9 @@ export async function apiRequest(endpoint: string, method: string = 'GET', data?
 
     return result;
   } catch (error: any) {
+    if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+        throw new Error("Unable to connect to the server. Please check if the backend is running.");
+    }
     console.error('API Error:', error.message);
     throw error;
   }

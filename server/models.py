@@ -6,11 +6,15 @@ class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255))
+    full_name = Column(String(255), nullable=True) # Added from user snippet
     email = Column(String(255), unique=True, index=True)
+    phone = Column(String(20), nullable=True) # Added from user snippet
+    blood_group = Column(String(10), nullable=True) # Added from user snippet
     password = Column(String(255))
     role = Column(String(50))
     otp = Column(String(10), nullable=True)
     otp_expiry = Column(DateTime, nullable=True)
+    available_to_donate = Column(Boolean, default=False) # Added from user snippet
     latitude = Column(DECIMAL(10, 8), nullable=True)
     longitude = Column(DECIMAL(11, 8), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -20,12 +24,13 @@ class Donor(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     phone = Column(String(20), nullable=True)
-    blood_group = Column(String(5), nullable=True)
+    blood_group = Column(String(10), nullable=True)
     age = Column(Integer, nullable=True)
     city = Column(String(100), nullable=True)
     is_available = Column(Boolean, default=True)
     is_eligible = Column(Boolean, default=True)
     is_eligible_next_date = Column(DateTime, nullable=True)
+    last_donation_date = Column(DateTime, nullable=True)
     last_status_update = Column(DateTime, nullable=True)
 
 class Patient(Base):
@@ -33,15 +38,19 @@ class Patient(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     phone = Column(String(20), nullable=True)
-    blood_group = Column(String(5), nullable=True)
+    blood_group = Column(String(10), nullable=True)
     hospital_name = Column(String(255), nullable=True)
+    units_needed = Column(Integer, default=0)
     city = Column(String(100), nullable=True)
 
 class BloodRequest(Base):
     __tablename__ = "blood_requests"
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer, ForeignKey("patients.id"))
-    blood_group = Column(String(5))
+    patient_name = Column(String(255), nullable=True)
+    hospital_name = Column(String(255), nullable=True)
+    contact_number = Column(String(20), nullable=True)
+    blood_group = Column(String(10))
     units_required = Column(Integer)
     urgency_level = Column(String(50))
     status = Column(String(50), default="Pending")
@@ -54,7 +63,7 @@ class DonorDonation(Base):
     donor_id = Column(Integer) # This models the donor table or user table? app.py says user_id
     donation_date = Column(DateTime)
     units = Column(Integer)
-    blood_group = Column(String(5))
+    blood_group = Column(String(10))
     location = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
 
@@ -82,7 +91,7 @@ class DonorRequest(Base):
     id = Column(Integer, primary_key=True, index=True)
     patient_id = Column(Integer)
     donor_id = Column(Integer)
-    blood_group = Column(String(5))
+    blood_group = Column(String(10))
     units_needed = Column(Integer)
     urgency = Column(String(50))
     message = Column(Text)

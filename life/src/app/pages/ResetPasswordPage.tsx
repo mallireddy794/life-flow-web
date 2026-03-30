@@ -5,6 +5,7 @@ import { Label } from '../components/ui/label';
 import { Lock, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
 import { apiRequest } from '../services/api';
+import { validatePassword } from '../utils/validation';
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -18,10 +19,17 @@ export function ResetPasswordPage() {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setPasswordError(null);
+
+    if (!validatePassword(formData.newPassword)) {
+      setPasswordError('Password must be at least 8 characters, include one uppercase, one number, and one special character.');
+      return;
+    }
 
     if (formData.newPassword !== formData.confirmPassword) {
       setError('Passwords do not match!');
@@ -72,14 +80,21 @@ export function ResetPasswordPage() {
                 type="password"
                 placeholder="Create a strong password"
                 value={formData.newPassword}
-                onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-                className="mt-1"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData({ ...formData, newPassword: val });
+                  if (val && !validatePassword(val)) {
+                    setPasswordError('Password must be 8+ chars, with an uppercase, a number, and a special char');
+                  } else {
+                    setPasswordError(null);
+                  }
+                }}
+                className={`mt-1 ${passwordError ? 'border-red-500' : ''}`}
                 required
-                minLength={8}
               />
-              <p className="text-xs text-gray-500 mt-1">
-                Must be at least 8 characters long
-              </p>
+              {passwordError && (
+                <p className="text-red-500 text-xs mt-1">{passwordError}</p>
+              )}
             </div>
 
             <div>

@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { ImageWithFallback } from '../components/figma/ImageWithFallback';
 import { useUser } from '../contexts/UserContext';
 import { apiRequest } from '../services/api';
+import { validateEmail } from '../utils/validation';
 
 
 export function LoginPage() {
@@ -20,13 +21,35 @@ export function LoginPage() {
   const [role, setRole] = useState<'donor' | 'patient'>(initialRole);
 
   const [loading, setLoading] = useState(false);
-
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setEmail(value);
+
+    // Only validate as email if it contains '@' or if the user is typing
+    if (value && value.includes('@')) {
+      if (!validateEmail(value)) {
+        setEmailError('Invalid email format');
+      } else {
+        setEmailError(null);
+      }
+    } else {
+      setEmailError(null);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    if (email.includes('@') && !validateEmail(email)) {
+      setEmailError('Enter a valid email address');
+      setLoading(false);
+      return;
+    }
 
     try {
       const result = await apiRequest('/login', 'POST', {
@@ -35,8 +58,8 @@ export function LoginPage() {
         role
       });
 
-      // result.user: { id, name, role }
-      setUser(result.user);
+      const userData = { ...result.user, email };
+      setUser(userData);
       setGlobalRole(result.user.role);
 
       if (result.user.role === 'patient') {
@@ -99,10 +122,13 @@ export function LoginPage() {
                 type="text"
                 placeholder="Enter your email or phone"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1"
+                onChange={handleEmailChange}
+                className={`mt-1 ${emailError ? 'border-red-500' : ''}`}
                 required
               />
+              {emailError && (
+                <p className="text-red-500 text-xs mt-1">{emailError}</p>
+              )}
             </div>
 
             <div>

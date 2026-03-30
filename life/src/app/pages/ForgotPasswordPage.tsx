@@ -7,6 +7,7 @@ import { Mail, ArrowLeft } from 'lucide-react';
 import { useState } from 'react';
 
 import { apiRequest } from '../services/api';
+import { validateEmail } from '../utils/validation';
 
 export function ForgotPasswordPage() {
   const navigate = useNavigate();
@@ -14,11 +15,29 @@ export function ForgotPasswordPage() {
   const [role, setRole] = useState<'donor' | 'patient' | 'hospital'>('donor');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setEmail(value);
+
+    if (value && !validateEmail(value)) {
+      setEmailError('Invalid email format');
+    } else {
+      setEmailError(null);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    if (!validateEmail(email)) {
+      setEmailError('Enter a valid email address');
+      setLoading(false);
+      return;
+    }
 
     try {
       await apiRequest('/send-otp', 'POST', {
@@ -72,10 +91,13 @@ export function ForgotPasswordPage() {
                 type="email"
                 placeholder="Enter your registered email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="mt-1"
+                onChange={handleEmailChange}
+                className={`mt-1 ${emailError ? 'border-red-500' : ''}`}
                 required
               />
+              {emailError && (
+                <p className="text-red-500 text-xs mt-1">{emailError}</p>
+              )}
             </div>
 
             {error && (

@@ -7,9 +7,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Calendar } from '../components/ui/calendar';
 import { ArrowLeft, Calendar as CalendarIcon, Clock, MapPin } from 'lucide-react';
 import { useState } from 'react';
+import { useLocation } from 'react-router';
+import { useUser } from '../contexts/UserContext';
+import { apiRequest } from '../services/api';
 
 export function BookAppointment() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user } = useUser();
+  const donor = location.state?.donor;
+
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [formData, setFormData] = useState({
     hospital: '',
@@ -29,9 +36,20 @@ export function BookAppointment() {
     'Riverside Health Center'
   ];
 
-  const handleConfirm = (e: React.FormEvent) => {
+  const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
-    navigate('/appointment-confirmation');
+    if (!user?.id) return;
+    try {
+      await apiRequest('/appointment/book', 'POST', {
+        donor_id: user.id,
+        hospital_name: formData.hospital || donor?.hospital_name || 'Hospital',
+        units: 1,
+        date: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+      });
+      navigate('/appointment-confirmation');
+    } catch (err) {
+      console.error("Booking failed:", err);
+    }
   };
 
   return (
@@ -47,7 +65,9 @@ export function BookAppointment() {
             </button>
             <div>
               <h1 className="font-bold text-xl text-gray-900">Book Appointment</h1>
-              <p className="text-sm text-gray-500">Schedule your blood donation</p>
+              <p className="text-sm text-gray-500">
+                Schedule your blood donation with {donor?.name || 'a donor'}
+              </p>
             </div>
           </div>
         </div>
