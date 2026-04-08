@@ -44,11 +44,10 @@ export function PatientDashboard() {
           const { latitude, longitude } = position.coords;
           try {
             const data = await apiRequest(`/donors/nearby?lat=${latitude}&lng=${longitude}&blood_group=${encodeURIComponent(bloodGroup)}&radius_km=50`, 'GET');
-
-            let combinedDonors = data || [];
-            setDonors(combinedDonors);
+            console.log(`Donors found: ${data?.length || 0}`);
+            setDonors(data || []);
           } catch (err) {
-            console.error("Failed to fetch donors for dashboard preview:", err);
+            console.error("Dashboard donor fetch error:", err);
           }
         });
       }

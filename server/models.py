@@ -29,9 +29,15 @@ class Donor(Base):
     city = Column(String(100), nullable=True)
     is_available = Column(Boolean, default=True)
     is_eligible = Column(Boolean, default=True)
-    is_eligible_next_date = Column(DateTime, nullable=True)
+    is_eligible_next_date = Column(DateTime, nullable=True) # Added
     last_donation_date = Column(DateTime, nullable=True)
     last_status_update = Column(DateTime, nullable=True)
+    past_acceptance_rate = Column(DECIMAL(4, 2), default=0.80) # Added
+    response_time_avg = Column(Integer, default=5) # Added
+    donor_active_status = Column(Integer, default=1) # Added
+    avg_rating = Column(DECIMAL(3, 2), default=0.0)
+    sentiment_score = Column(DECIMAL(3, 2), default=0.0)
+    total_reviews = Column(Integer, default=0)
 
 class Patient(Base):
     __tablename__ = "patients"
@@ -96,4 +102,14 @@ class DonorRequest(Base):
     urgency = Column(String(50))
     message = Column(Text)
     status = Column(String(50), default="PENDING")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class DonorReview(Base):
+    __tablename__ = "donor_reviews"
+    id = Column(Integer, primary_key=True, index=True)
+    donor_id = Column(Integer, ForeignKey("users.id"))
+    patient_id = Column(Integer, ForeignKey("users.id"))
+    rating = Column(Integer)
+    review_text = Column(Text)
+    sentiment_score = Column(DECIMAL(3, 2))
     created_at = Column(DateTime, default=datetime.utcnow)

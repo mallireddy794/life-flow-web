@@ -3,6 +3,8 @@ from flask_mysqldb import MySQL
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 import random
+import math
+import joblib
 from datetime import datetime, timedelta
 import smtplib
 from email.mime.text import MIMEText
@@ -24,6 +26,82 @@ app.config['MYSQL_DB'] = 'lifeflow_db'
 app.config['MYSQL_CURSORCLASS'] = 'DictCursor' # Optional: set default cursor
 
 mysql = MySQL(app)
+
+# ================= LOAD AI MODEL =================
+try:
+    model = joblib.load("lifeflow_best_donor_model (1).pkl")
+except Exception as e:
+    print(f"Failed to load model: {e}")
+    model = None
+
+# ================= BLOOD COMPATIBILITY =================
+COMPATIBLE = {
+    "A+": ["A+", "A-", "O+", "O-"],
+    "A-": ["A-", "O-"],
+    "B+": ["B+", "B-", "O+", "O-"],
+    "B-": ["B-", "O-"],
+    "AB+": ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+    "AB-": ["A-", "B-", "AB-", "O-"],
+    "O+": ["O+", "O-"],
+    "O-": ["O-"]
+}
+
+# ================= DISTANCE FUNCTION =================
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+# ================= BLOOD MATCH SCORE =================
+def get_blood_match_score(patient_bg: str, donor_bg: str) -> float:
+    patient_bg = (patient_bg or "").strip().upper()
+    donor_bg = (donor_bg or "").strip().upper()
+
+    if donor_bg == patient_bg:
+        return 1.0
+    if donor_bg in COMPATIBLE.get(patient_bg, []):
+        return 0.7
+    return 0.0
+
+# ================= SAFE VALUE HELPERS =================
+def to_int(value, default=0):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+def to_float(value, default=0.0):
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+# ================= AI SCORE FUNCTION =================
+def predict_ai_score(donor_features: dict) -> float:
+    if not model:
+        return 0.0
+    feature_row = [[
+        donor_features["blood_match_score"],
+        donor_features["distance_km"],
+        donor_features["is_available"],
+        donor_features["is_eligible"],
+        donor_features["days_since_last_donation"],
+        donor_features["urgency_level"],
+        donor_features["past_acceptance_rate"],
+        donor_features["response_time_avg"],
+        donor_features["donor_active_status"]
+    ]]
+    score = model.predict_proba(feature_row)[0][1]
+    return round(float(score), 4)
 
 import re
 
@@ -47,6 +125,24 @@ def is_strong_password(password):
 def is_valid_phone(phone):
     p = str(phone).strip()
     return len(p) == 10 and p.isdigit()
+
+def analyze_sentiment(text):
+    text = (text or "").lower()
+    positive_words = {"good", "great", "excellent", "kind", "helpful", "fast", "polite", "professional", "quick", "best", "hero", "life", "save", "thanks", "amazing", "blessing"}
+    negative_words = {"bad", "rude", "late", "unhelpful", "slow", "unprofessional", "worst", "mean", "angry", "ignored", "awful", "terrible"}
+    
+    # Split text into simplified words
+    import re
+    words = re.findall(r'\w+', text)
+    if not words:
+        return 0.5
+        
+    pos = sum(1 for w in words if w in positive_words)
+    neg = sum(1 for w in words if w in negative_words)
+    
+    if pos + neg == 0:
+        return 0.5
+    return round(pos / (pos + neg), 2)
 
 # ================= SIGNUP / REGISTER =================
 @app.route('/signup', methods=['GET', 'POST'])
@@ -610,6 +706,70 @@ def donation_history():
     }), 200
 
 
+# ================= DONOR RATING & SENTIMENT =================
+@app.route('/donor/rate', methods=['POST'])
+def rate_donor():
+    try:
+        data = request.get_json(force=True)
+        donor_id = data.get("donor_id")
+        patient_id = data.get("patient_id")
+        rating = to_int(data.get("rating"), 5)
+        review_text = data.get("review_text", "")
+
+        if not donor_id or not patient_id:
+            return jsonify({"error": "donor_id and patient_id are required"}), 400
+
+        sentiment_score = analyze_sentiment(review_text)
+
+        cur = mysql.connection.cursor()
+        
+        # 1. Insert or update review
+        cur.execute("""
+            INSERT INTO donor_reviews (donor_id, patient_id, rating, review_text, sentiment_score)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE 
+                rating = VALUES(rating),
+                review_text = VALUES(review_text),
+                sentiment_score = VALUES(sentiment_score),
+                created_at = CURRENT_TIMESTAMP
+        """, (donor_id, patient_id, rating, review_text, sentiment_score))
+        
+        # 2. Update donor's overall rating
+        cur.execute("""
+            SELECT AVG(rating), AVG(sentiment_score), COUNT(*) 
+            FROM donor_reviews 
+            WHERE donor_id = %s
+        """, (donor_id,))
+        stats = cur.fetchone()
+        
+        # Handle Dict vs Tuple results
+        if isinstance(stats, dict):
+            new_avg = float(stats['AVG(rating)'])
+            new_sentiment = float(stats['AVG(sentiment_score)'])
+            total = int(stats['COUNT(*)'])
+        else:
+            new_avg = float(stats[0])
+            new_sentiment = float(stats[1])
+            total = int(stats[2])
+
+        cur.execute("""
+            UPDATE donors 
+            SET avg_rating = %s, sentiment_score = %s, total_reviews = %s 
+            WHERE user_id = %s
+        """, (new_avg, new_sentiment, total, donor_id))
+
+        mysql.connection.commit()
+        cur.close()
+
+        return jsonify({
+            "message": "Donor rated successfully",
+            "new_avg_rating": round(new_avg, 2),
+            "sentiment_score": round(sentiment_score, 2)
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Rating failed: {str(e)}"}), 500
+
+
 # ================= PATIENT PROFILE =================
 @app.route('/patient/profile/<int:user_id>', methods=['GET', 'PUT'])
 def patient_profile(user_id):
@@ -1018,8 +1178,10 @@ def donors_nearby():
         radius = float(data.get("radius_km", data.get("radius", 10)))
 
         if not blood_group or not lat_str or not lng_str:
-            print(f"DEBUG /donors/nearby FAILED: Missing params - blood_group={blood_group}, lat={lat_str}, lng={lng_str}")
+            print(f"DEBUG: /donors/nearby FAILED: Missing params - blood_group='{blood_group}', lat='{lat_str}', lng='{lng_str}'")
             return jsonify({"error": "Missing blood_group/lat/lng"}), 400
+
+        print(f"DEBUG: /donors/nearby - Searching for '{blood_group}' within {radius}km of ({lat_str}, {lng_str})")
 
         lat = float(lat_str)
         lng = float(lng_str)
@@ -1173,13 +1335,25 @@ def send_request():
             cursor.close()
             return jsonify({"error": f"User ID {donor_id} is not registered as a donor."}), 400
 
+        # Standardize: Always use patients.id for blood_requests.patient_id column
+        p_id_actual = p_data.get("id") or p_data.get("patient_id")
+        if not p_id_actual:
+            # Fallback re-querying patients table if joined select didn't have it
+            cursor.execute("SELECT id FROM patients WHERE user_id = %s", (patient_id,))
+            id_row = cursor.fetchone()
+            p_id_actual = id_row['id'] if id_row else None
+
+        if not p_id_actual:
+            cursor.close()
+            return jsonify({"error": "Could not identify patient record ID"}), 400
+
         # Insert into blood_requests for full tracking support
         cursor.execute("""
             INSERT INTO blood_requests 
             (patient_id, donor_id, patient_name, blood_group, units_required, hospital_name, city, urgency_level, status)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
-            patient_id,
+            p_id_actual,
             donor_id,
             p_data["patient_name"],
             blood_group,
@@ -1313,32 +1487,32 @@ def donor_request_update():
 
 
 # ================= LOCATION TRACKING =================
-@app.route("/update_location", methods=["POST"])
+@app.route('/update_location', methods=['POST'])
 def update_location():
-    try:
-        data = request.get_json(force=True)
-        user_id = data.get("user_id")
-        lat = data.get("lat", data.get("latitude"))
-        lng = data.get("lng", data.get("longitude"))
+    data = request.get_json(force=True)
+    user_id = data.get('user_id')
+    lat = data.get('latitude')
+    lng = data.get('longitude')
 
-        if user_id is None or lat is None or lng is None:
-            return jsonify({"error": "Missing user_id, lat/latitude, or lng/longitude"}), 400
+    if not all([user_id is not None, lat is not None, lng is not None]):
+        return jsonify({"error": "user_id, latitude, longitude required"}), 400
 
-        cur = mysql.connection.cursor()
-        cur.execute("UPDATE users SET latitude=%s, longitude=%s WHERE id=%s", (lat, lng, user_id))
-        mysql.connection.commit()
-        cur.close()
+    cursor = mysql.connection.cursor()
+    cursor.execute(
+        "UPDATE users SET latitude=%s, longitude=%s WHERE id=%s",
+        (lat, lng, user_id)
+    )
+    mysql.connection.commit()
+    cursor.close()
 
-        return jsonify({"message": "Location updated"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"message": "Location updated successfully"}), 200
 
 
 # ================= GET USER LOCATION =================
 @app.route("/user/location/<int:user_id>", methods=["GET"])
 def get_user_location(user_id):
     try:
-        cur = mysql.connection.cursor()
+        cur = mysql.connection.cursor(DictCursor)
         cur.execute("SELECT latitude, longitude FROM users WHERE id=%s", (user_id,))
         row = cur.fetchone()
         cur.close()
@@ -1483,169 +1657,20 @@ def patients_nearby():
         return jsonify({"error": str(e)}), 500
 
 
-# ================= ROOT =================
+# ✅ THIS ROUTE FIXES YOUR 404
 @app.route("/", methods=["GET"])
 def root():
     return jsonify({
-        "status": "LifeFlow API is running",
+        "status": "LifeFlow Chat API is running",
         "routes": {
-            "POST": [
-                "/signup",
-                "/register",
-                "/login",
-                "/send-otp",
-                "/verify-otp",
-                "/chat/send",
-                "/patient/send_request",
-                "/donor/donations/add",
-                "/reset-password",
-                "/update_location"
-            ],
-            "PUT": [
-                "/forgot-password",
-                "/donor/availability/<user_id>",
-                "/donor/profile/<user_id>",
-                "/patient/profile/<user_id>",
-                "/hospital/profile/<user_id>",
-                "/admin/approve/<request_id>",
-                "/admin/reject/<request_id>",
-                "/donor/request/update"
-            ],
-            "GET": [
-                "/",
-                "/chat/history?user1=1&user2=2",
-                "/chat/inbox?user_id=1",
-                "/users/donors",
-                "/users/patients",
-                "/donor/donations/history?donor_id=1",
-                "/donor/requests?donor_id=1",
-                "/donor/requests/nearby",
-                "/patients/nearby",
-                "/patient/profile/<user_id>",
-                "/patient/tracking/<user_id>"
-            ]
+            "POST": ["/chat/send"],
+            "GET": ["/chat/history?user1=1&user2=2"]
         }
-    }), 200
+    })
 
 
-# ================= CHAT SYSTEM =================
-@app.route('/chat/send', methods=['POST'])
-def send_chat_message():
-    try:
-        data = request.get_json(force=True)
-        sender_id = data.get('sender_id')
-        receiver_id = data.get('receiver_id')
-        message = data.get('message')
-
-        if not all([sender_id, receiver_id, message]):
-            return jsonify({"error": "Missing fields"}), 400
-
-        cur = mysql.connection.cursor()
-        cur.execute("""
-            INSERT INTO messages (sender_id, receiver_id, message)
-            VALUES (%s, %s, %s)
-        """, (sender_id, receiver_id, message))
-        mysql.connection.commit()
-        cur.close()
-
-        return jsonify({"message": "Sent successfully"}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/chat/inbox', methods=['GET'])
-def get_chat_inbox():
-    try:
-        user_id = request.args.get('user_id')
-        if not user_id:
-            return jsonify({"error": "Missing user_id"}), 400
-
-        cur = mysql.connection.cursor(DictCursor)
-        # Fetch unique users chatted with
-        query = """
-            SELECT 
-                u.id as other_user_id, 
-                u.name as name,
-                m.message as last_message,
-                m.created_at as last_time
-            FROM messages m
-            JOIN users u ON (u.id = m.sender_id OR u.id = m.receiver_id)
-            WHERE (m.sender_id = %s OR m.receiver_id = %s)
-              AND u.id != %s
-              AND m.id IN (
-                  SELECT MAX(id) FROM messages 
-                  WHERE sender_id = %s OR receiver_id = %s
-                  GROUP BY CASE WHEN sender_id = %s THEN receiver_id ELSE sender_id END
-              )
-            ORDER BY m.created_at DESC
-        """
-        cur.execute(query, (user_id, user_id, user_id, user_id, user_id, user_id))
-        rows = cur.fetchall()
-        cur.close()
-
-        return jsonify(rows), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
-@app.route('/chat/history', methods=['GET'])
-def get_chat_history():
-    try:
-        user1 = request.args.get('user1')
-        user2 = request.args.get('user2')
-
-        if not user1 or not user2:
-            return jsonify({"error": "Missing user IDs"}), 400
-
-        cur = mysql.connection.cursor(DictCursor)
-        cur.execute("""
-            SELECT * FROM messages 
-            WHERE (sender_id = %s AND receiver_id = %s)
-               OR (sender_id = %s AND receiver_id = %s)
-            ORDER BY created_at ASC
-        """, (user1, user2, user2, user1))
-        rows = cur.fetchall()
-        cur.close()
-
-        return jsonify(rows), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# ================= DONATION HISTORY =================
-@app.route('/donor/donations/history', methods=['GET'])
-def get_donation_history():
-    try:
-        donor_id = request.args.get('donor_id')
-        if not donor_id:
-            return jsonify({"error": "Missing donor_id"}), 400
-
-        cur = mysql.connection.cursor(DictCursor)
-        # Fetch donations
-        cur.execute("""
-            SELECT dh.*, d.blood_group 
-            FROM donation_history dh
-            JOIN donors d ON d.user_id = dh.donor_id
-            WHERE dh.donor_id = %s
-            ORDER BY dh.donation_date DESC
-        """, (donor_id,))
-        rows = cur.fetchall()
-        cur.close()
-
-        # Format rows for frontend
-        result = []
-        for r in rows:
-            result.append({
-                "id": r['id'],
-                "donation_date": r['donation_date'].strftime("%Y-%m-%d") if r['donation_date'] else None,
-                "location": r['hospital_name'],
-                "units": r['units'],
-                "blood_group": r['blood_group'],
-                "status": r['status']
-            })
-
-        return jsonify({"history": result}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # ================= APPOINTMENT BOOKING & HISTORY =================
@@ -1805,36 +1830,6 @@ def donor_accept_request():
         return jsonify({"error": str(e)}), 500
 
 
-# ================= PATIENT BROADCAST REQUEST =================
-@app.route('/patient/request/<int:user_id>', methods=['POST'])
-def create_broadcast_request(user_id):
-    try:
-        data = request.get_json(force=True)
-        patient_name = data.get('patient_name', 'Unnamed Patient')
-        blood_group = data.get('blood_group')
-        units_required = data.get('units_required', 1)
-        hospital_name = data.get('hospital_name')
-        city = data.get('city')
-        contact_number = data.get('contact_number')
-        urgency_level = data.get('urgency_level', 'NORMAL')
-
-        if not blood_group or not hospital_name:
-            return jsonify({"error": "blood_group and hospital_name are required"}), 400
-
-        cur = mysql.connection.cursor()
-        cur.execute("""
-            INSERT INTO blood_requests 
-            (patient_id, patient_name, blood_group, units_required, hospital_name, city, contact_number, urgency_level, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pending')
-        """, (user_id, patient_name, blood_group, units_required, hospital_name, city, contact_number, urgency_level))
-        
-        mysql.connection.commit()
-        request_id = cur.lastrowid
-        cur.close()
-
-        return jsonify({"message": "Emergency request broadcasted", "request_id": request_id}), 201
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # ================= PATIENT TRACKING =================
@@ -1843,16 +1838,36 @@ def patient_tracking(user_id):
     try:
         cur = mysql.connection.cursor(DictCursor)
         
-        # 1. Try primary blood_requests table
+        # Mapping user_id to patient_id (patients.id)
+        cur.execute("SELECT id FROM patients WHERE user_id = %s", (user_id,))
+        patient = cur.fetchone()
+        
+        if not patient:
+            cur.close()
+            return jsonify(None), 200
+            
+        p_id = patient['id']
+        
+        # 1. Try primary blood_requests table (using patients.id)
         cur.execute("""
             SELECT * FROM blood_requests 
             WHERE patient_id = %s
             ORDER BY created_at DESC
             LIMIT 1
-        """, (user_id,))
+        """, (p_id,))
         row = cur.fetchone()
         
-        # 2. If not found, try legacy donor_requests table
+        # 2. If not found, try by users.id (for any legacy or direct mishandling)
+        if not row:
+            cur.execute("""
+                SELECT * FROM blood_requests 
+                WHERE patient_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (user_id,))
+            row = cur.fetchone()
+
+        # 3. Finally, try legacy donor_requests table
         if not row:
             cur.execute("""
                 SELECT dr.*, p.hospital_name, p.city 
@@ -1924,6 +1939,174 @@ def patient_tracking(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# ================= AI DONOR SEARCH =================
+def fetch_all_donors():
+    """
+    Gets donor data from users + donors table.
+    """
+    cursor = mysql.connection.cursor(DictCursor)
+    print("DEBUG: Fetching all donors from DB...")
+    query = """
+        SELECT
+            u.id,
+            u.name,
+            u.email,
+            u.latitude,
+            u.longitude,
+            d.phone,
+            d.blood_group,
+            d.age,
+            d.city,
+            d.is_available,
+            d.is_eligible,
+            d.last_status_update,
+            d.past_acceptance_rate,
+            d.response_time_avg,
+            d.donor_active_status,
+            d.last_donation_date,
+            d.avg_rating,
+            d.sentiment_score,
+            d.total_reviews
+        FROM users u
+        INNER JOIN donors d ON u.id = d.user_id
+        WHERE u.role = 'donor'
+          AND u.latitude IS NOT NULL
+          AND u.longitude IS NOT NULL
+    """
+    cursor.execute(query)
+    donors = cursor.fetchall()
+    cursor.close()
+    return donors
+
+@app.route('/emergency-donors', methods=['POST'])
+def emergency_donors():
+    try:
+        data = request.get_json(force=True)
+
+        patient_id = data.get("patient_id")
+        patient_blood_group = str(data.get("blood_group", "")).strip().upper()
+        patient_lat = to_float(data.get("lat"))
+        patient_lng = to_float(data.get("lng"))
+        units_required = to_int(data.get("units_required", 1), 1)
+        radius_km = to_float(data.get("radius_km", 5), 5.0)
+
+        print(f"DEBUG: Emergency Search - BG: {patient_blood_group}, Lat: {patient_lat}, Lng: {patient_lng}, Radius: {radius_km}")
+
+        if not patient_blood_group or (patient_lat == 0.0 and patient_lng == 0.0):
+            return jsonify({
+                "error": "blood_group, lat, lng are required"
+            }), 400
+
+        all_donors = fetch_all_donors()
+        ranked_donors = []
+
+        for donor in all_donors:
+            donor_lat = to_float(donor.get("latitude"))
+            donor_lng = to_float(donor.get("longitude"))
+
+            if donor_lat == 0.0 and donor_lng == 0.0:
+                continue
+
+            distance_km = haversine_km(patient_lat, patient_lng, donor_lat, donor_lng)
+
+            if distance_km > radius_km:
+                continue
+
+            donor_blood_group = str(donor.get("blood_group", "")).strip().upper()
+            
+            if patient_blood_group == "ALL":
+                blood_match_score = 1.0
+            else:
+                blood_match_score = get_blood_match_score(patient_blood_group, donor_blood_group)
+
+            if blood_match_score == 0.0:
+                continue
+
+            is_available = to_int(donor.get("is_available"), 0)
+            is_eligible = to_int(donor.get("is_eligible"), 0)
+
+            if is_available != 1 or is_eligible != 1:
+                continue
+
+            # --- REAL AI VALUES FROM DB ---
+            last_don = donor.get("last_donation_date")
+            if last_don:
+                if isinstance(last_don, str):
+                    last_don = datetime.strptime(last_don[:10], "%Y-%m-%d").date()
+                elif hasattr(last_don, 'date'):
+                    last_don = last_don.date()
+                days_since_last_donation = (datetime.now().date() - last_don).days
+            else:
+                days_since_last_donation = 180 
+
+            past_acceptance_rate = to_float(donor.get("past_acceptance_rate"), 0.80)
+            response_time_avg = to_int(donor.get("response_time_avg"), 5)
+            donor_active_status = to_int(donor.get("donor_active_status"), 1)
+            
+            urgency_level = 2  
+
+            donor_features = {
+                "blood_match_score": blood_match_score,
+                "distance_km": round(distance_km, 2),
+                "is_available": is_available,
+                "is_eligible": is_eligible,
+                "days_since_last_donation": days_since_last_donation,
+                "urgency_level": urgency_level,
+                "past_acceptance_rate": past_acceptance_rate,
+                "response_time_avg": response_time_avg,
+                "donor_active_status": donor_active_status
+            }
+
+            ai_score = predict_ai_score(donor_features)
+
+            ranked_donors.append({
+                "donor_user_id": donor["id"], # STANDARD KEY
+                "donor_id": donor["id"],      # Fallback
+                "name": donor.get("name"),
+                "email": donor.get("email"),
+                "phone": donor.get("phone"),
+                "blood_group": donor_blood_group,
+                "age": donor.get("age"),
+                "city": donor.get("city"),
+                "latitude": donor_lat,
+                "longitude": donor_lng,
+                "distance_km": round(distance_km, 2),
+                "blood_match_score": blood_match_score,
+                "is_available": is_available,
+                "is_eligible": is_eligible,
+                "days_since_last_donation": days_since_last_donation,
+                "past_acceptance_rate": past_acceptance_rate,
+                "p_acceptance_rate": f"{int(past_acceptance_rate * 100)}%",
+                "response_time_avg": response_time_avg,
+                "donor_active_status": donor_active_status,
+                "urgency_level": urgency_level,
+                "ai_score": int(ai_score * 100),
+                "avg_rating": to_float(donor.get("avg_rating"), 0.0),
+                "sentiment_score": to_float(donor.get("sentiment_score"), 0.0),
+                "total_reviews": to_int(donor.get("total_reviews"), 0)
+            })
+
+        ranked_donors.sort(key=lambda x: (x["ai_score"], -x["distance_km"]), reverse=True)
+
+        best_donor = ranked_donors[0] if ranked_donors else None
+
+        return jsonify({
+            "message": "Emergency donor search completed",
+            "patient_id": patient_id,
+            "patient_blood_group": patient_blood_group,
+            "units_required": units_required,
+            "radius_km": radius_km,
+            "best_donor": best_donor,
+            "nearby_donors": ranked_donors,
+            "total_donors_found": len(ranked_donors)
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "error": "Failed to fetch emergency donors",
+            "details": str(e)
+        }), 500
 
 # ================= RUN =================
 if __name__ == "__main__":

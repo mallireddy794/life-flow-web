@@ -176,7 +176,7 @@ export function NearbyBloodRequests() {
                   {role === 'patient' && (
                     <div className="flex-shrink-0">
                       <div className="w-16 h-16 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-white text-xl font-bold">
-                        {item.name.split(' ').map((n: string) => n[0]).join('')}
+                        {(item.name || 'D').split(' ').map((n: string) => n[0]).join('')}
                       </div>
                     </div>
                   )}

@@ -42,14 +42,21 @@ export function MatchedDonors() {
   }, [user]);
 
   const fetchDonors = (bg: string) => {
-
-
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(async (position) => {
         const { latitude, longitude } = position.coords;
         try {
-          const matchedData = await apiRequest(`/donors/nearby?lat=${latitude}&lng=${longitude}&blood_group=${encodeURIComponent(bg)}&radius_km=50`, 'GET');
-          setDonors(matchedData || []);
+          // Use the more advanced AI emergency-donors endpoint
+          const response = await apiRequest('/emergency-donors', 'POST', {
+             patient_id: user?.id,
+             blood_group: bg,
+             lat: latitude,
+             lng: longitude,
+             radius_km: 50
+          });
+          
+          // Map to the format donor list expects (handling both structures)
+          setDonors(response.nearby_donors || []);
         } catch (err) {
           console.error("Failed to fetch matched donors:", err);
           setDonors([]);
@@ -118,12 +125,12 @@ export function MatchedDonors() {
         ) : (
           <div className="space-y-4">
             {donors.map((donor: any) => (
-              <Card key={donor.donor_user_id} className="p-6 hover:shadow-lg transition">
+              <Card key={donor.donor_user_id || donor.donor_id} className="p-6 hover:shadow-lg transition">
                 <div className="flex flex-col md:flex-row gap-6">
                   {/* Donor Avatar */}
                   <div className="flex-shrink-0">
                     <div className="w-20 h-20 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-white">
-                      <span className="text-2xl font-bold">{donor.name.split(' ').map((n: string) => n[0]).join('')}</span>
+                      <span className="text-2xl font-bold">{(donor.name || 'D').split(' ').map((n: string) => n[0]).join('')}</span>
                     </div>
                   </div>
 
@@ -138,7 +145,7 @@ export function MatchedDonors() {
                             {donor.distance_km?.toFixed(1)} km away
                           </span>
                           <span>•</span>
-                          <span>Available in {donor.city}</span>
+                          <span>Available in {donor.city || 'Your Area'}</span>
                         </div>
                       </div>
 
@@ -150,17 +157,34 @@ export function MatchedDonors() {
                       </div>
                     </div>
 
-                    {/* AI Match Score */}
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium text-gray-700">AI Match Score</span>
-                        <span className="text-sm font-bold text-green-600">{donor.ai_score || 95}%</span>
+                    {/* AI Match Score and Metrics */}
+                    <div className="mb-4 space-y-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700">AI Compatibility Score</span>
+                          <span className="text-sm font-bold text-green-600">{donor.ai_score || 95}%</span>
+                        </div>
+                        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-green-500 to-green-600 transition-all"
+                            style={{ width: `${donor.ai_score || 95}%` }}
+                          ></div>
+                        </div>
                       </div>
-                      <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-green-500 to-green-600 transition-all"
-                          style={{ width: `${donor.ai_score || 95}%` }}
-                        ></div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        <div className="bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Acceptance Rate</p>
+                          <p className="text-sm font-bold text-blue-600">{donor.p_acceptance_rate || '80%'}</p>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Response Time</p>
+                          <p className="text-sm font-bold text-purple-600">{donor.response_time_avg || 5} min</p>
+                        </div>
+                        <div className="bg-gray-50 p-2 rounded-lg border border-gray-100">
+                          <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">Status</p>
+                          <p className="text-sm font-bold text-green-600">Active</p>
+                        </div>
                       </div>
                     </div>
 
@@ -168,7 +192,7 @@ export function MatchedDonors() {
                     <div className="flex flex-wrap gap-3">
                       <Button
                         className="bg-blue-600 hover:bg-blue-700"
-                        onClick={() => navigate('/chat', { state: { recipientId: donor.donor_user_id, name: donor.name } })}
+                        onClick={() => navigate('/chat', { state: { recipientId: donor.donor_user_id || donor.donor_id, name: donor.name } })}
                       >
                         <MessageCircle className="w-4 h-4 mr-2" />
                         Contact Donor

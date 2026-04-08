@@ -148,7 +148,7 @@ export function LiveRequestTracking() {
                 <h4 className="font-semibold text-gray-900">{match.donor_name}</h4>
                 <p className="text-sm text-gray-600">Verified Donor • Matching blood group</p>
               </div>
-              <Button onClick={() => navigate('/chat')}>
+              <Button onClick={() => navigate('/chat', { state: { recipientId: match.donor_id, name: match.donor_name } })}>
                 Contact Donor
               </Button>
             </div>
